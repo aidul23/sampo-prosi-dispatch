@@ -62,6 +62,45 @@ npm run dev
 Open http://localhost:5173. The Vite dev server proxies `/api/*` requests to
 the backend on port 8000.
 
+## Deploy for client demo
+
+The app has two parts: a static React frontend (GitHub Pages) and a Python API
+backend (Render free tier). GitHub Pages cannot run the backend, so both are
+needed for the full demo (Excel upload, planning, export).
+
+### 1. Deploy the backend on Render
+
+1. Sign in at [render.com](https://render.com) and connect the GitHub repo
+   `aidul23/sampo-prosi-dispatch`.
+2. Create a **Blueprint** from the repo (it picks up `render.yaml` at the root),
+   or create a **Web Service** manually:
+   - Root directory: `backend`
+   - Build: `pip install -r requirements.txt`
+   - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+3. After deploy, note the service URL, e.g.
+   `https://sampo-dispatch-api.onrender.com`.
+
+The free tier sleeps after inactivity; the first request may take ~30 seconds.
+
+### 2. Configure GitHub Pages
+
+1. In the repo on GitHub: **Settings → Secrets and variables → Actions**.
+2. Add a repository secret:
+   - Name: `VITE_API_URL`
+   - Value: your Render API URL + `/api`, e.g.
+     `https://sampo-dispatch-api.onrender.com/api`
+3. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**.
+
+### 3. Publish the frontend
+
+Push to `main` (or run the **Deploy to GitHub Pages** workflow manually). The
+site will be available at:
+
+**https://aidul23.github.io/sampo-prosi-dispatch/**
+
+Share that link with the client for feedback. Data is session-only in the browser;
+refresh clears it.
+
 ## API endpoints
 
 | Method | Endpoint                    | Description                                                        |

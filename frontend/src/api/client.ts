@@ -1,6 +1,6 @@
 import type { DriverCapacity, Order, PlanResponse } from "../types/dispatch";
 
-const BASE_URL = "/api";
+const BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
