@@ -75,7 +75,8 @@ needed for the full demo (Excel upload, planning, export).
 2. Create a **Blueprint** from the repo (it picks up `render.yaml` at the root),
    or create a **Web Service** manually:
    - Root directory: `backend`
-   - Build: `pip install -r requirements.txt`
+   - **Python version: 3.12** (required — 3.14 has no pre-built wheels for pydantic/pandas)
+   - Build: `pip install --upgrade pip && pip install -r requirements.txt`
    - Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 3. After deploy, note the service URL, e.g.
    `https://sampo-dispatch-api.onrender.com`.
@@ -89,7 +90,8 @@ The free tier sleeps after inactivity; the first request may take ~30 seconds.
    - Name: `VITE_API_URL`
    - Value: your Render API URL + `/api`, e.g.
      `https://sampo-dispatch-api.onrender.com/api`
-3. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**.
+3. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**
+   (not “Deploy from a branch”). If this is not set, the deploy job fails with a 404.
 
 ### 3. Publish the frontend
 
