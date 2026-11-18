@@ -1,16 +1,16 @@
-"""Nearest-neighbor stop sequencing within each driver route.
+"""Stop sequencing within each driver route.
 
 Each stop is placed at its geocoded address when available, otherwise at its
-route area centre. Distances come from real road distances (OSRM) when the
-routing service is reachable, else from approximate area / straight-line
-distances.
+route area centre. The tour starts at the Lapväärtti terminal and returns
+there; it is built nearest-neighbour first and then improved with 2-opt and
+or-opt moves. Distances are real road distances (OSRM) when the routing
+service is reachable, else approximate distances.
 """
 
 from collections import defaultdict
-from typing import List, Optional
+from typing import List
 
-from .area_centroids import DEPOT_COORDS, get_centroid, haversine_km
-from .area_distances import DEPOT, area_distance
+from .area_distances import DEPOT
 from .models import (
     DriverCapacity,
     Order,
@@ -18,50 +18,14 @@ from .models import (
     StopOptimizeResponse,
 )
 from .planning_service import calculate_plan
-from .routing_service import road_distance_matrix
-
-
-def _has_coords(order: Order) -> bool:
-    return order.lat is not None and order.lng is not None
-
-
-def _point(order: Order) -> tuple[float, float]:
-    if _has_coords(order):
-        return (order.lat, order.lng)  # type: ignore[return-value]
-    return get_centroid(order.routeArea)
-
-
-def _approx_distance(a: Optional[Order], b: Order) -> float:
-    """Fallback km between two stops (a=None means depot)."""
-    a_precise = a is None or _has_coords(a)
-    if a_precise and _has_coords(b):
-        lat1, lng1 = DEPOT_COORDS if a is None else _point(a)
-        lat2, lng2 = _point(b)
-        return round(haversine_km(lat1, lng1, lat2, lng2), 1)
-    return area_distance(DEPOT if a is None else a.routeArea, b.routeArea)
-
-
-def _build_distance_fn(driver_orders: List[Order]):
-    """Return (distance(i, j), uses_roads). Index 0 = depot, i>0 = driver_orders[i-1]."""
-    points = [DEPOT_COORDS] + [_point(order) for order in driver_orders]
-    matrix = road_distance_matrix(points)
-
-    def node(i: int) -> Optional[Order]:
-        return None if i == 0 else driver_orders[i - 1]
-
-    def distance(i: int, j: int) -> float:
-        if matrix is not None and matrix[i][j] is not None:
-            return matrix[i][j]  # type: ignore[return-value]
-        return _approx_distance(node(i), driver_orders[j - 1])
-
-    return distance, matrix is not None
+from .vrp import DEPOT_STOP, DistanceMatrix, build_route, has_coords, route_cost, stop_for
 
 
 def optimize_stop_order(
     orders: List[Order],
     drivers: List[DriverCapacity],
 ) -> StopOptimizeResponse:
-    """Assign stopSequence per driver using nearest-neighbor from depot."""
+    """Assign stopSequence per driver: shortest round trip from the terminal."""
     result_orders = [Order(**order.model_dump()) for order in orders]
     by_driver: dict[str, list[Order]] = defaultdict(list)
 
@@ -74,54 +38,38 @@ def optimize_stop_order(
     notes: List[str] = []
 
     for driver_name in sorted(by_driver):
-        driver_orders = by_driver[driver_name]
-        if not driver_orders:
-            continue
+        # Tie-break order for equal distances: consignee, then id.
+        driver_orders = sorted(by_driver[driver_name], key=lambda o: (o.consignee, o.id))
+        matrix = DistanceMatrix([DEPOT_STOP] + [stop_for(o) for o in driver_orders])
+        route = build_route(list(range(1, len(driver_orders) + 1)), matrix)
 
-        distance, uses_roads = _build_distance_fn(driver_orders)
-        unvisited = list(range(1, len(driver_orders) + 1))
-        current = 0  # depot
-        sequence = 1
-        total_km = 0.0
-
-        while unvisited:
-            nxt = min(
-                unvisited,
-                key=lambda j: (
-                    distance(current, j),
-                    driver_orders[j - 1].consignee,
-                    driver_orders[j - 1].id,
-                ),
-            )
-            leg_km = distance(current, nxt)
-            total_km += leg_km
-            unvisited.remove(nxt)
-            next_order = driver_orders[nxt - 1]
-            previous = next_order.stopSequence
-            next_order.stopSequence = sequence
-            if previous != sequence:
-                origin = DEPOT if current == 0 else (
-                    driver_orders[current - 1].consignee or "previous stop"
+        previous_node = 0
+        for sequence, node in enumerate(route, start=1):
+            order = driver_orders[node - 1]
+            leg_km = matrix(previous_node, node)
+            previous_seq = order.stopSequence
+            order.stopSequence = sequence
+            if previous_seq != sequence:
+                origin = DEPOT if previous_node == 0 else (
+                    driver_orders[previous_node - 1].consignee or "previous stop"
                 )
                 changes.append(
                     StopOptimizationChange(
-                        orderId=next_order.id,
-                        consignee=next_order.consignee,
+                        orderId=order.id,
+                        consignee=order.consignee,
                         deliveryDriver=driver_name,
-                        routeArea=next_order.routeArea,
-                        previousSequence=previous,
+                        routeArea=order.routeArea,
+                        previousSequence=previous_seq,
                         suggestedSequence=sequence,
-                        reason=f"Nearest stop from {origin} (~{leg_km:.0f} km)",
+                        reason=f"Next after {origin} (~{leg_km:.0f} km)",
                     )
                 )
-            current = nxt
-            sequence += 1
+            previous_node = node
 
-        located = sum(1 for order in driver_orders if _has_coords(order))
-        basis = "road distances" if uses_roads else "approximate distances"
+        located = sum(1 for order in driver_orders if has_coords(order))
         notes.append(
-            f"{driver_name}: sequenced {len(driver_orders)} stop(s) from {DEPOT} "
-            f"using {basis}, ~{total_km:.0f} km one way "
+            f"{driver_name}: {len(driver_orders)} stop(s) from {DEPOT} using {matrix.basis}, "
+            f"~{route_cost(route, matrix):.0f} km round trip "
             f"({located}/{len(driver_orders)} at exact address/postal code, "
             "others at area centre)"
         )

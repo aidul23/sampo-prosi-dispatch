@@ -79,8 +79,8 @@ def test_all_mode_can_reassign_every_order():
 
 def test_over_capacity_cluster_leaves_overflow_unassigned():
     orders = [
-        _order("1", route_area="Heavy", delivery_driver="", fin=50),
-        _order("2", route_area="Heavy", delivery_driver="", fin=50),
+        _order("1", route_area="Oulu", delivery_driver="", fin=50),
+        _order("2", route_area="Oulu", delivery_driver="", fin=50),
     ]
     result = optimize_routes(orders, DRIVERS, mode="unassigned_only")
 

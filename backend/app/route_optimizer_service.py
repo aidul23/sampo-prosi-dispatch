@@ -1,7 +1,23 @@
-"""Rule-based route assignment: group by route area, respect truck capacity."""
+"""Driver assignment: which truck takes which order.
 
-from collections import defaultdict
-from typing import List
+Capacitated vehicle routing from the Lapväärtti terminal:
+
+1. Each order is placed at its geocoded address, or its route area centre.
+2. Trucks without orders get a starting stop in a distinct region
+   (farthest-first), so routes cover different directions instead of one
+   truck criss-crossing the country.
+3. Remaining orders are inserted where they add the fewest kilometres
+   (regret insertion: orders with only one good option go first),
+   never exceeding a truck's FIN capacity.
+4. Local search moves / swaps orders between trucks while that shortens
+   total driving distance.
+
+Existing assignments are kept in ``unassigned_only`` mode. DELIVERED orders
+are never moved. Orders without any known location are left for the planner.
+"""
+
+from collections import Counter
+from typing import Dict, List
 
 from .models import (
     DriverCapacity,
@@ -11,63 +27,28 @@ from .models import (
     Order,
 )
 from .planning_service import calculate_plan, fin_equivalent
+from .vrp import (
+    DEPOT_STOP,
+    DistanceMatrix,
+    Vehicle,
+    assign_vehicles,
+    best_insertion,
+    is_locatable,
+    route_cost,
+    stop_for,
+)
 
 
-def _normalize_area(route_area: str) -> str:
-    area = route_area.strip()
+def _area_label(order: Order) -> str:
+    area = order.routeArea.strip()
     return area if area else "Unspecified"
 
 
-def _remaining_capacity(
-    capacity_by_driver: dict[str, float], used_by_driver: dict[str, float], driver: str
-) -> float:
-    return capacity_by_driver.get(driver, 0.0) - used_by_driver.get(driver, 0.0)
-
-
-def _pick_driver_for_cluster(
-    drivers: List[DriverCapacity],
-    capacity_by_driver: dict[str, float],
-    used_by_driver: dict[str, float],
-    driver_areas: dict[str, set[str]],
-    area: str,
-    cluster_load: float,
-) -> str | None:
-    eligible: list[tuple[str, bool, float]] = []
-    for driver in drivers:
-        name = driver.driverName
-        remaining = _remaining_capacity(capacity_by_driver, used_by_driver, name)
-        if remaining >= cluster_load:
-            affinity = area in driver_areas.get(name, set())
-            eligible.append((name, affinity, remaining))
-
-    if not eligible:
-        return None
-
-    eligible.sort(key=lambda item: (item[1], item[2]), reverse=True)
-    return eligible[0][0]
-
-
-def _pick_driver_for_order(
-    drivers: List[DriverCapacity],
-    capacity_by_driver: dict[str, float],
-    used_by_driver: dict[str, float],
-    driver_areas: dict[str, set[str]],
-    area: str,
-    order_load: float,
-) -> str | None:
-    eligible: list[tuple[str, bool, float]] = []
-    for driver in drivers:
-        name = driver.driverName
-        remaining = _remaining_capacity(capacity_by_driver, used_by_driver, name)
-        if remaining >= order_load:
-            affinity = area in driver_areas.get(name, set())
-            eligible.append((name, affinity, remaining))
-
-    if not eligible:
-        return None
-
-    eligible.sort(key=lambda item: (item[1], item[2]), reverse=True)
-    return eligible[0][0]
+def _main_areas(orders: List[Order], limit: int = 4) -> str:
+    counts = Counter(_area_label(o) for o in orders)
+    names = [name for name, _ in counts.most_common(limit)]
+    more = len(counts) - len(names)
+    return ", ".join(names) + (f" +{more} more" if more > 0 else "")
 
 
 def optimize_routes(
@@ -75,7 +56,7 @@ def optimize_routes(
     drivers: List[DriverCapacity],
     mode: OptimizeMode = "unassigned_only",
 ) -> OptimizeResponse:
-    """Suggest driver assignments grouped by route area within capacity."""
+    """Suggest driver assignments that minimise driving distance within capacity."""
     if not drivers:
         return OptimizeResponse(
             orders=list(orders),
@@ -85,112 +66,153 @@ def optimize_routes(
         )
 
     result_orders = [Order(**order.model_dump()) for order in orders]
-    capacity_by_driver = {d.driverName: d.truckCapacity for d in drivers}
-    used_by_driver: dict[str, float] = {d.driverName: 0.0 for d in drivers}
-    driver_areas: dict[str, set[str]] = {d.driverName: set() for d in drivers}
-    previous_drivers = {order.id: order.deliveryDriver.strip() for order in result_orders}
-
     for order in result_orders:
-        order.finEquivalent = fin_equivalent(
-            order.pallets, order.palletType, order.stackable
-        )
+        order.finEquivalent = fin_equivalent(order.pallets, order.palletType, order.stackable)
 
-    if mode == "all":
-        for order in result_orders:
-            order.deliveryDriver = ""
-        used_by_driver = {name: 0.0 for name in capacity_by_driver}
-        driver_areas = {name: set() for name in capacity_by_driver}
-        to_optimize = list(result_orders)
-    else:
-        for order in result_orders:
-            driver = order.deliveryDriver.strip()
-            if driver:
-                used_by_driver[driver] = used_by_driver.get(driver, 0.0) + order.finEquivalent
-                driver_areas.setdefault(driver, set()).add(_normalize_area(order.routeArea))
-        to_optimize = [order for order in result_orders if not order.deliveryDriver.strip()]
+    vehicles = [Vehicle(d.driverName, d.truckCapacity) for d in drivers]
+    vehicle_names = {v.name for v in vehicles}
+    previous = {o.id: o.deliveryDriver.strip() for o in result_orders}
 
-    area_clusters: dict[str, list[Order]] = defaultdict(list)
-    for order in to_optimize:
-        area_clusters[_normalize_area(order.routeArea)].append(order)
-
-    sorted_clusters = sorted(
-        area_clusters.items(),
-        key=lambda item: -sum(order.finEquivalent for order in item[1]),
-    )
-
-    changes: List[OptimizationChange] = []
-    notes: List[str] = []
-
-    for area, cluster_orders in sorted_clusters:
-        cluster_load = sum(order.finEquivalent for order in cluster_orders)
-        driver = _pick_driver_for_cluster(
-            drivers, capacity_by_driver, used_by_driver, driver_areas, area, cluster_load
-        )
-
-        if driver:
-            for order in cluster_orders:
-                prev = previous_drivers[order.id] if mode == "all" else order.deliveryDriver.strip()
-                order.deliveryDriver = driver
-                used_by_driver[driver] += order.finEquivalent
-                driver_areas.setdefault(driver, set()).add(area)
-                if prev != driver:
-                    changes.append(
-                        OptimizationChange(
-                            orderId=order.id,
-                            consignee=order.consignee,
-                            routeArea=area,
-                            previousDriver=prev,
-                            suggestedDriver=driver,
-                            reason=f"Area cluster assigned to {driver} (best remaining capacity)",
-                        )
-                    )
-            notes.append(
-                f"Assigned {len(cluster_orders)} {area} order(s) to {driver} "
-                f"({cluster_load:.1f} FIN)"
-            )
+    # Which orders are fixed on a truck, and which may be (re)assigned.
+    fixed_orders: Dict[str, List[Order]] = {v.name: [] for v in vehicles}
+    candidates: List[Order] = []
+    skipped_delivered = 0
+    for order in result_orders:
+        driver = order.deliveryDriver.strip()
+        keep = order.status == "DELIVERED" or (mode == "unassigned_only" and driver)
+        if keep:
+            if driver in vehicle_names:
+                fixed_orders[driver].append(order)
+            elif order.status == "DELIVERED" and not driver:
+                skipped_delivered += 1
             continue
+        order.deliveryDriver = ""
+        candidates.append(order)
 
-        sorted_orders = sorted(cluster_orders, key=lambda o: -o.finEquivalent)
-        assigned_count = 0
-        for order in sorted_orders:
-            pick = _pick_driver_for_order(
-                drivers,
-                capacity_by_driver,
-                used_by_driver,
-                driver_areas,
-                area,
-                order.finEquivalent,
-            )
-            if not pick:
+    unlocatable = [o for o in candidates if not is_locatable(o)]
+    candidates = [o for o in candidates if is_locatable(o)]
+
+    # Deterministic order: heavier first, then by name/id.
+    candidates.sort(key=lambda o: (-o.finEquivalent, o.consignee, o.id))
+    routed: List[Order] = [o for name in sorted(fixed_orders) for o in fixed_orders[name]]
+    routed += candidates
+    index_of = {o.id: i + 1 for i, o in enumerate(routed)}  # 0 = depot
+    order_at = {i + 1: o for i, o in enumerate(routed)}
+
+    notes: List[str] = []
+    changes: List[OptimizationChange] = []
+
+    if candidates:
+        matrix = DistanceMatrix([DEPOT_STOP] + [stop_for(o) for o in routed])
+        loads = {index_of[o.id]: o.finEquivalent for o in routed}
+        result = assign_vehicles(
+            matrix,
+            vehicles,
+            {name: [index_of[o.id] for o in lst] for name, lst in fixed_orders.items()},
+            [index_of[o.id] for o in candidates],
+            loads,
+        )
+
+        for name, route in result.routes.items():
+            for node in route:
+                order_at[node].deliveryDriver = name
+
+        used = {name: sum(loads[n] for n in route) for name, route in result.routes.items()}
+        capacity = {v.name: v.capacity for v in vehicles}
+
+        # Explain each change: km it adds to its truck vs the next-best truck.
+        for order in candidates:
+            name = order.deliveryDriver
+            prev = previous[order.id]
+            if name == prev:
                 continue
-
-            prev = previous_drivers[order.id] if mode == "all" else order.deliveryDriver.strip()
-            order.deliveryDriver = pick
-            used_by_driver[pick] += order.finEquivalent
-            driver_areas.setdefault(pick, set()).add(area)
-            assigned_count += 1
-            if prev != pick:
+            if not name:
                 changes.append(
                     OptimizationChange(
                         orderId=order.id,
                         consignee=order.consignee,
-                        routeArea=area,
+                        routeArea=_area_label(order),
                         previousDriver=prev,
-                        suggestedDriver=pick,
-                        reason=f"Partial cluster split — assigned to {pick} (remaining capacity)",
+                        suggestedDriver="",
+                        reason="Not enough truck capacity — left unassigned",
                     )
                 )
+                continue
+            node = index_of[order.id]
+            route = result.routes[name]
+            without = [n for n in route if n != node]
+            own_km = route_cost(route, matrix) - route_cost(without, matrix)
+            alternatives = sorted(
+                (best_insertion(result.routes[other], node, matrix)[0], other)
+                for other in result.routes
+                if other != name and used[other] + loads[node] <= capacity[other] + 1e-9
+            )
+            if alternatives:
+                alt_km, alt_name = alternatives[0]
+                reason = (
+                    f"Adds ~{own_km:.0f} km to {name}'s route "
+                    f"({alt_name} would add ~{alt_km:.0f} km)"
+                )
+            else:
+                reason = f"Adds ~{own_km:.0f} km to {name}'s route (no other truck has room)"
+            changes.append(
+                OptimizationChange(
+                    orderId=order.id,
+                    consignee=order.consignee,
+                    routeArea=_area_label(order),
+                    previousDriver=prev,
+                    suggestedDriver=name,
+                    reason=reason,
+                )
+            )
 
-        leftover = len(cluster_orders) - assigned_count
-        if assigned_count:
+        notes.append(
+            f"Assigned by shortest total driving distance from the terminal ({matrix.basis}), "
+            "within each truck's FIN capacity."
+        )
+        for vehicle in vehicles:
+            route = result.routes[vehicle.name]
+            if not route:
+                notes.append(f"{vehicle.name}: no orders")
+                continue
+            route_orders = [order_at[n] for n in route]
             notes.append(
-                f"Split {area} cluster: {assigned_count} order(s) assigned, "
-                f"{leftover} left unassigned"
+                f"{vehicle.name}: {len(route)} order(s), {used[vehicle.name]:.1f}/"
+                f"{vehicle.capacity:g} FIN, ~{route_cost(route, matrix):.0f} km round trip — "
+                f"{_main_areas(route_orders)}"
             )
-        elif leftover:
+        if result.unassigned:
+            lost = [order_at[n] for n in result.unassigned]
+            fin = sum(o.finEquivalent for o in lost)
             notes.append(
-                f"{leftover} order(s) in {area} left unassigned — no driver capacity"
+                f"{len(lost)} order(s) ({fin:.1f} FIN) left unassigned — not enough truck "
+                "capacity. Add a driver or raise a capacity."
             )
+        if changes:
+            notes.append("Run “Optimize stop order” after applying to sequence the stops.")
+
+    if unlocatable:
+        notes.append(
+            f"{len(unlocatable)} order(s) left unassigned — location unknown "
+            f"({', '.join(o.consignee or o.id for o in unlocatable[:3])}"
+            f"{'…' if len(unlocatable) > 3 else ''}). Add an address or route area."
+        )
+    if skipped_delivered:
+        notes.append(f"{skipped_delivered} delivered order(s) skipped.")
+    if mode == "all":
+        # Orders that lost their driver (unassigned now) also count as changes.
+        for order in unlocatable:
+            if previous[order.id]:
+                changes.append(
+                    OptimizationChange(
+                        orderId=order.id,
+                        consignee=order.consignee,
+                        routeArea=_area_label(order),
+                        previousDriver=previous[order.id],
+                        suggestedDriver="",
+                        reason="Location unknown — assign manually",
+                    )
+                )
 
     optimized_orders, summaries = calculate_plan(result_orders, drivers)
     return OptimizeResponse(

@@ -121,15 +121,18 @@ This mirrors working in Excel, with clearer capacity feedback.
 
 **What you do:** Press **Optimize routes**, review the preview, then Apply (or Apply & calculate).
 
-**What we use:** Rule-based assignment (not AI, not Google Maps routing).
+**What we use:** Transparent routing rules based on real road distances (not AI).
 
 **Logic in short:**
 
-1. Group orders by delivery area (e.g. Espoo, Sipoo, Turku)  
-2. Prefer keeping the same area on the same driver when capacity allows  
-3. Assign areas to the driver with the most remaining capacity  
-4. Prefer a driver who already serves that area  
-5. If an area group does not fit on one truck, split largest orders first; leftovers stay unassigned with a note  
+1. Each order is placed on the map (exact address, postal code, or area centre)  
+2. Trucks start in different regions, so routes cover different directions  
+3. Each remaining order goes to the truck where it adds the fewest kilometres, within FIN capacity  
+4. Orders are then moved or swapped between trucks while that shortens total driving  
+5. Very long routes (over ~900 km round trip, adjustable) are avoided — far-apart regions are not combined on one truck  
+6. Orders with no known location, and orders that do not fit any truck, stay unassigned with a note  
+
+Every suggestion shows why, e.g. *"Adds ~35 km to Driver B's route (Driver A would add ~210 km)"*, and each truck's load and estimated kilometres.
 
 **Modes:**
 
@@ -144,12 +147,12 @@ This mirrors working in Excel, with clearer capacity feedback.
 
 **What you do:** After drivers are assigned, press **Optimize stop order**, review, then Apply.
 
-**What we use:** Nearest-neighbour sequencing by **approximate area distance** (not live road GPS).
+**What we use:** Shortest round trip from the terminal and back, using road distances between delivery addresses (approximate distances when no address is known).
 
 **Logic in short:**
 
-1. For each delivery driver, start from a depot location  
-2. Visit the next closest delivery area, then the next, and so on  
+1. For each delivery driver, start from the terminal  
+2. Build a tour by always going to the closest next stop, then improve it by reversing / moving stops while the round trip gets shorter  
 3. Write a **Stop #** on each order for that driver  
 
 **Current limitation (advisory):**  
@@ -301,7 +304,8 @@ Please help us confirm:
 6. Should **pickup drivers (B)** influence delivery planning, or only delivery drivers (F)?  
 7. What happens to unfinished orders the next day?  
 8. Who receives the final plan — only the planner, or also drivers (print / Excel / phone)?  
-9. Any hard rules (e.g. cold chain, time windows, “this customer always same driver”)?  
+9. Any hard rules (e.g. cold chain, time windows, “this customer always same driver”)?
+9b. How long may one truck's route be — one day (km or driving hours), or are some routes overnight / two-day?  
 10. Is a Finnish-language interface needed for daily use?
 
 ---

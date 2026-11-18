@@ -201,6 +201,7 @@ Configuration (environment variables on the backend):
 | `GEOCODER_URL` | `https://nominatim.openstreetmap.org/search` | Nominatim-compatible endpoint |
 | `ROUTING_ENABLED` | `1` | `0` disables road distances |
 | `OSRM_URL` | `https://router.project-osrm.org` | OSRM server for road distances |
+| `LONG_ROUTE_KM` | `900` | Round-trip km above which routes are penalised in driver assignment |
 
 Note: addresses are sent to these external services. The public Nominatim
 and OSRM demo servers are fine for a demo; for daily production use, switch
@@ -208,18 +209,32 @@ to a self-hosted or commercial service (e.g. Digitransit, Google, HERE).
 
 ## Route optimization rules
 
-**Driver assignment** (rule-based, explainable):
+**Driver assignment** (capacitated vehicle routing, explainable):
 
-- Orders are grouped by `routeArea` (empty → "Unspecified").
-- Area clusters are assigned to the driver with the most remaining capacity.
-- If a whole cluster does not fit, orders are split largest-first; overflow stays unassigned.
-- `unassigned_only` mode (default) leaves existing driver assignments unchanged.
+- Every order is placed at its geocoded address, or its route area centre.
+  Orders with no known location (no address, unknown area) are left for the
+  planner; DELIVERED orders are never moved.
+- Trucks without orders get a starting stop in a distinct region
+  (farthest-first), so trucks cover different directions.
+- Remaining orders are inserted where they add the fewest kilometres
+  (regret insertion — orders with only one good option are placed first),
+  never exceeding a truck's FIN capacity.
+- Local search then moves and swaps orders between trucks (and re-orders
+  stops with 2-opt / or-opt) while that shortens total driving distance.
+- Routes longer than `LONG_ROUTE_KM` (default 900 km round trip) are
+  penalised, so far-apart regions (e.g. Helsinki + Oulu) are not merged into
+  one very long route. A truck may stay unused if it is not needed.
+- Each suggested change explains the trade-off, e.g. "Adds ~35 km to
+  Driver B's route (Driver A would add ~210 km)"; notes show each truck's
+  load, round-trip km and main areas.
+- `unassigned_only` mode (default) keeps existing driver assignments.
 
 **Stop sequencing**:
 
 - Uses road distances (OSRM) between geocoded addresses when available;
-  otherwise area distances (local matrix + haversine between city centroids).
-- Nearest-neighbor from depot (**Lapväärtti / Porintie 382**) through each driver's stops.
+  otherwise approximate distances (local area matrix, or straight line × 1.25).
+- Round trip from the depot (**Lapväärtti / Porintie 382**) and back:
+  nearest-neighbour tour improved with 2-opt and or-opt.
 - Driver sheets and the delivery list UI show **Stop #** after applying.
 
 ## Pallet conversion rules
@@ -279,5 +294,5 @@ modelled on the customer's real daily sheet:
 - **Delivery time windows:** ETA prediction and time-window aware planning.
 - **Natural language interface:** "Move all Nokia orders to Driver B" style
   commands on top of the structured plan.
-- **Better route ordering:** improve nearest-neighbor with 2-opt or a VRP
-  solver now that road distances are available; time windows.
+- **Time windows and driving-time limits:** delivery windows, driver hours,
+  multi-day routes.

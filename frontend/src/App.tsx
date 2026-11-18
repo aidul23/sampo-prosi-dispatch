@@ -317,7 +317,12 @@ export default function App() {
       );
       const updatedOrders = orders.map((order) =>
         changeIds.has(order.id)
-          ? { ...order, deliveryDriver: suggestedById.get(order.id) ?? order.deliveryDriver }
+          ? {
+              ...order,
+              deliveryDriver: suggestedById.get(order.id) ?? order.deliveryDriver,
+              // Moved to another truck: its old stop number no longer applies.
+              stopSequence: null,
+            }
           : order
       );
       setOrders(updatedOrders);

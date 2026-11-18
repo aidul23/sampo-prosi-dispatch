@@ -102,3 +102,12 @@ def area_distance(from_area: str, to_area: str) -> float:
     lat1, lon1 = get_centroid(from_area or DEPOT)
     lat2, lon2 = get_centroid(to_area)
     return round(haversine_km(lat1, lon1, lat2, lon2), 1)
+
+
+def local_area_distance(from_area: str, to_area: str) -> float | None:
+    """Hand-tuned km between two areas if the local matrix has the pair, else None."""
+    a = normalize_area_key(from_area)
+    b = normalize_area_key(to_area)
+    if a == b:
+        return 0.0
+    return _DISTANCE_LOOKUP.get(tuple(sorted((a, b))))

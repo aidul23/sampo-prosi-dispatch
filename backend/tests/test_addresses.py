@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from app import address_book, geocoding_service, plan_storage, stop_optimizer_service
+from app import address_book, geocoding_service, plan_storage, vrp
 from app.address_parser import parse_address
 from app.excel_service import export_driver_sheets, parse_orders_from_excel
 from app.models import DriverCapacity, Order
@@ -190,7 +190,7 @@ def test_stop_order_prefers_road_matrix(monkeypatch):
     def fake_matrix(points):
         return [[0, 100, 300], [100, 0, 400], [300, 400, 0]]
 
-    monkeypatch.setattr(stop_optimizer_service, "road_distance_matrix", fake_matrix)
+    monkeypatch.setattr(vrp, "road_distance_matrix", fake_matrix)
     result = optimize_stop_order(orders, DRIVERS)
     seq = {o.id: o.stopSequence for o in result.orders}
     assert seq == {"x": 1, "y": 2}
