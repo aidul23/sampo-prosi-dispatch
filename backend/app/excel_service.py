@@ -7,6 +7,8 @@ from typing import List, Optional
 import pandas as pd
 
 from .models import DriverCapacity, Order, RouteSummary
+from .address_parser import parse_address
+from .consignee_parser import apply_route_area
 from .planning_service import calculate_plan, fin_equivalent
 
 # Header aliases (lowercased) -> order field.
@@ -22,6 +24,13 @@ HEADER_ALIASES = {
     "vastaanottaja": "consignee",
     "pallets": "pallets",
     "lavat": "pallets",
+    "address": "address",
+    "delivery address": "address",
+    "osoite": "address",
+    "toimitusosoite": "address",
+    "katuosoite": "address",
+    "adress": "address",
+    "leveransadress": "address",
     "extra info": "extraInfo",
     "lisätieto": "extraInfo",
     "lisatieto": "extraInfo",
@@ -139,18 +148,33 @@ def parse_orders_from_excel(file_bytes: bytes) -> List[Order]:
         if status not in {"NEW", "PLANNED", "DELIVERED", "CARRY_OVER"}:
             status = "NEW"
 
+        consignee = _clean_str(raw.get("consignee"))
+        route_area = _clean_str(raw.get("routeArea"))
+        route_area, parse_warning = apply_route_area(consignee, route_area)
+
+        # Address: explicit address column wins; otherwise try to find one
+        # written inside the consignee cell (e.g. "Valio, Tuupakantie 10, 01740 Vantaa").
+        address_cell = _clean_str(raw.get("address"))
+        parsed = parse_address(address_cell or consignee)
+        address = address_cell or parsed.text
+        if parse_warning and parsed.city:
+            # Consignee name gave no area, but the address names the city.
+            route_area, parse_warning = parsed.city, None
+
         order = Order(
             id=str(uuid.uuid4())[:8],
             customer=_clean_str(raw.get("customer")),
             pickupDriver=_clean_str(raw.get("pickupDriver")),
-            consignee=_clean_str(raw.get("consignee")),
+            consignee=consignee,
+            address=address,
             pallets=_parse_pallets(raw.get("pallets")),
             palletType=pallet_type,
             stackable=_parse_bool(raw.get("stackable")),
             extraInfo=_clean_str(raw.get("extraInfo")),
             deliveryDriver=_clean_str(raw.get("deliveryDriver")),
-            routeArea=_clean_str(raw.get("routeArea")),
+            routeArea=route_area,
             status=status,
+            warning=parse_warning,
         )
         order.finEquivalent = fin_equivalent(order.pallets, order.palletType, order.stackable)
         orders.append(order)
@@ -159,9 +183,11 @@ def parse_orders_from_excel(file_bytes: bytes) -> List[Order]:
 
 
 ORDER_COLUMNS = [
+    ("stopSequence", "Stop #"),
     ("customer", "Customer"),
     ("pickupDriver", "Pickup Driver"),
     ("consignee", "Consignee"),
+    ("address", "Address"),
     ("pallets", "Pallets"),
     ("palletType", "Pallet Type"),
     ("stackable", "Stackable"),
@@ -246,6 +272,13 @@ def export_driver_sheets(
         drivers_in_plan = sorted({o.deliveryDriver.strip() for o in orders if o.deliveryDriver.strip()})
         for driver in drivers_in_plan:
             driver_orders = [o for o in orders if o.deliveryDriver.strip() == driver]
+            driver_orders.sort(
+                key=lambda o: (
+                    o.stopSequence if o.stopSequence is not None else 9999,
+                    o.consignee,
+                    o.id,
+                )
+            )
             _write_sheet_with_title(
                 writer,
                 _safe_sheet_name(driver),

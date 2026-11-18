@@ -23,3 +23,7 @@ Thumbs.db
 # Logs & caches
 *.log
 .vite/
+
+# Local plan database
+data/
+*.db

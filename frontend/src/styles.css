@@ -233,6 +233,44 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.toolbar-block {
+  margin-bottom: 20px;
+}
+
+.toolbar-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.optimization-preview {
+  border: 1px solid #c4d9f5;
+  background: #f8fbff;
+}
+
+.optimization-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.optimization-notes {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.optimization-notes li {
+  margin-bottom: 4px;
+}
+
+.optimization-table td.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* Inputs */
 input[type="text"],
 input[type="number"],
@@ -392,6 +430,68 @@ tbody tr:hover {
   min-width: 160px;
 }
 
+.order-table .col-address {
+  min-width: 190px;
+}
+
+.address-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.location-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.location-address {
+  background: var(--ok);
+}
+
+.location-postal_code {
+  background: #e6a700;
+}
+
+.location-area {
+  background: #c5ccd4;
+}
+
+.location-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+
+.location-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.address-book-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.address-book-form input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.address-book-table input {
+  width: 100%;
+  min-width: 160px;
+}
+
 .order-table .col-pallets {
   width: 72px;
   min-width: 72px;
@@ -463,6 +563,18 @@ tbody tr:hover {
 .driver-name {
   flex: 1;
   font-weight: 500;
+}
+
+.driver-capacity-tag {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.driver-capacity-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
 }
 
 .driver-row-new {
@@ -630,4 +742,119 @@ tbody tr:hover {
 
 .driver-plan-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/* Route map */
+.route-map-card .card-header {
+  align-items: flex-start;
+}
+
+.route-map-wrap {
+  height: 420px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.route-map {
+  height: 100%;
+  width: 100%;
+}
+
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  justify-content: flex-end;
+  max-width: 520px;
+}
+
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.map-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.map-legend-swatch.depot {
+  background: #111;
+}
+
+.map-legend-swatch.unassigned {
+  background: #999;
+}
+
+.draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #fff8e6;
+  border: 1px solid #f0d58a;
+}
+
+.draft-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.saved-plans-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 12px;
+}
+
+.saved-plans-form input[type="text"] {
+  min-width: 260px;
+}
+
+.saved-plans-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.saved-plans-active {
+  margin-bottom: 12px;
+}
+
+.saved-plans-table .row-active-plan {
+  background: #eef4fd;
+}
+
+.saved-plans-row-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.order-table-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-danger-text {
+  color: var(--danger);
+  border-color: #efb0b0;
+  background: #fff;
+}
+
+.btn-danger-text:hover {
+  background: var(--danger-bg);
 }

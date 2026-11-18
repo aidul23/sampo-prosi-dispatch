@@ -1,10 +1,13 @@
-import type { Order, OrderStatus, PalletType } from "../types/dispatch";
+import type { DriverCapacity, Order, OrderStatus, PalletType } from "../types/dispatch";
 import { ORDER_STATUSES, PALLET_TYPES } from "../types/dispatch";
+import { formatDriverLabel } from "../data/areaCentroids";
+import { PRECISION_LABEL } from "../utils/order";
 
 interface Props {
   orders: Order[];
-  driverNames: string[];
+  drivers: DriverCapacity[];
   onChange: (orders: Order[]) => void;
+  onClearAll?: () => void;
 }
 
 function newEmptyOrder(): Order {
@@ -13,6 +16,10 @@ function newEmptyOrder(): Order {
     customer: "",
     pickupDriver: "",
     consignee: "",
+    address: "",
+    lat: null,
+    lng: null,
+    geocodePrecision: null,
     pallets: 0,
     palletType: "FIN",
     stackable: false,
@@ -25,9 +32,13 @@ function newEmptyOrder(): Order {
   };
 }
 
-export default function OrderTable({ orders, driverNames, onChange }: Props) {
+export default function OrderTable({ orders, drivers, onChange, onClearAll }: Props) {
+  const driverNames = drivers.map((d) => d.driverName);
   function update(id: string, patch: Partial<Order>) {
-    onChange(orders.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    // A changed address invalidates its map location until it is located again.
+    const reset: Partial<Order> =
+      "address" in patch ? { lat: null, lng: null, geocodePrecision: null } : {};
+    onChange(orders.map((o) => (o.id === id ? { ...o, ...patch, ...reset } : o)));
   }
 
   function remove(id: string) {
@@ -38,13 +49,26 @@ export default function OrderTable({ orders, driverNames, onChange }: Props) {
     <section className="card">
       <div className="card-header">
         <h2>2. Daily orders ({orders.length})</h2>
-        <button onClick={() => onChange([...orders, newEmptyOrder()])}>
-          + Add order
-        </button>
+        <div className="order-table-actions">
+          <button onClick={() => onChange([...orders, newEmptyOrder()])}>
+            + Add order
+          </button>
+          {orders.length > 0 && onClearAll && (
+            <button type="button" className="btn-danger-text" onClick={onClearAll}>
+              Clear all
+            </button>
+          )}
+        </div>
       </div>
       {orders.length === 0 ? (
         <p className="status-text">No orders loaded. Upload an Excel file or load sample data.</p>
       ) : (
+        <>
+        <p className="location-legend">
+          <span><span className="location-dot location-address" /> Exact address</span>
+          <span><span className="location-dot location-postal_code" /> Postal code area</span>
+          <span><span className="location-dot location-area" /> Not located — route area centre</span>
+        </p>
         <div className="table-wrap">
           <table className="order-table">
             <thead>
@@ -52,6 +76,7 @@ export default function OrderTable({ orders, driverNames, onChange }: Props) {
                 <th className="col-customer">Customer</th>
                 <th className="col-pickup">Pickup Driver</th>
                 <th className="col-consignee">Consignee</th>
+                <th className="col-address">Address</th>
                 <th className="col-pallets">Pallets</th>
                 <th className="col-type">Pallet Type</th>
                 <th className="col-stack">Stackable</th>
@@ -93,6 +118,22 @@ export default function OrderTable({ orders, driverNames, onChange }: Props) {
                       value={order.consignee}
                       onChange={(e) => update(order.id, { consignee: e.target.value })}
                     />
+                  </td>
+                  <td>
+                    <div className="address-cell">
+                      <input
+                        type="text"
+                        className="table-input col-address"
+                        placeholder="Street, postal code city"
+                        value={order.address}
+                        onChange={(e) => update(order.id, { address: e.target.value })}
+                      />
+                      <span
+                        className={`location-dot location-${order.geocodePrecision ?? "area"}`}
+                        title={PRECISION_LABEL[order.geocodePrecision ?? "area"]}
+                        aria-label={PRECISION_LABEL[order.geocodePrecision ?? "area"]}
+                      />
+                    </div>
                   </td>
                   <td>
                     <input
@@ -145,9 +186,9 @@ export default function OrderTable({ orders, driverNames, onChange }: Props) {
                       onChange={(e) => update(order.id, { deliveryDriver: e.target.value })}
                     >
                       <option value="">— unassigned —</option>
-                      {driverNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
+                      {drivers.map((d) => (
+                        <option key={d.driverName} value={d.driverName}>
+                          {formatDriverLabel(d.driverName, d.truckCapacity)}
                         </option>
                       ))}
                       {order.deliveryDriver &&
@@ -200,6 +241,7 @@ export default function OrderTable({ orders, driverNames, onChange }: Props) {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );

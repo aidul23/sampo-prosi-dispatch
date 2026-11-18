@@ -27,6 +27,13 @@ sampo-dispatch-demo/
       models.py            # Pydantic data models
       excel_service.py     # Excel import/export
       planning_service.py  # Pallet conversion & capacity logic
+      route_optimizer_service.py  # Route area assignment optimization
+      stop_optimizer_service.py   # Stop sequence (nearest-neighbor)
+      address_parser.py           # Find street/postal code in free text
+      address_book.py             # Consignee address register (SQLite)
+      geocoding_service.py        # Address -> coordinates (Nominatim, cached)
+      routing_service.py          # Road distance matrix (OSRM)
+      area_distances.py           # Tampere-region area distance matrix
       sample_data.py       # Demo orders
     requirements.txt
   frontend/
@@ -88,8 +95,9 @@ The free tier sleeps after inactivity; the first request may take ~30 seconds.
 1. In the repo on GitHub: **Settings → Secrets and variables → Actions**.
 2. Add a repository secret:
    - Name: `VITE_API_URL`
-   - Value: your Render API URL + `/api`, e.g.
-     `https://sampo-dispatch-api.onrender.com/api`
+   - Value: your Render service URL **with** `/api` at the end, e.g.
+     `https://sampo-prosi-dispatch.onrender.com/api`
+     (Using only the host, without `/api`, breaks load/calculate/export until you redeploy.)
 3. **Settings → Pages → Build and deployment → Source:** choose **GitHub Actions**
    (not “Deploy from a branch”). If this is not set, the deploy job fails with a 404.
 
@@ -100,32 +108,119 @@ site will be available at:
 
 **https://aidul23.github.io/sampo-prosi-dispatch/**
 
-Share that link with the client for feedback. Data is session-only in the browser;
-refresh clears it.
+Share that link with the client for feedback. Plans can be **saved on the server**
+(SQLite on Render); a **local browser draft** is also kept automatically.
 
 ## API endpoints
 
 | Method | Endpoint                    | Description                                                        |
 | ------ | --------------------------- | ------------------------------------------------------------------ |
+| GET    | `/api/plans`                | List saved plans (summary)                                         |
+| GET    | `/api/plans/{id}`           | Load a saved plan                                                  |
+| POST   | `/api/plans`                | Save a new plan                                                    |
+| PUT    | `/api/plans/{id}`           | Update an existing saved plan                                      |
+| DELETE | `/api/plans/{id}`           | Delete a saved plan                                                |
+| POST   | `/api/geocode-orders`       | Locate order addresses (batched; call again while `pending` > 0)    |
+| GET    | `/api/address-book`         | List the consignee address register                                 |
+| POST   | `/api/address-book`         | Add / replace a consignee address                                   |
+| POST   | `/api/address-book/bulk`    | Save many consignee addresses at once                               |
+| PUT    | `/api/address-book/{id}`    | Edit a register entry                                               |
+| DELETE | `/api/address-book/{id}`    | Delete a register entry                                             |
+| POST   | `/api/address-book/apply`   | Fill empty order addresses from the register                        |
+| GET    | `/api/area-centroids`       | Area lat/lng centroids for map display                               |
 | POST   | `/api/upload-excel`         | Upload an Excel order sheet, returns parsed orders as JSON          |
 | GET    | `/api/sample-orders`        | Returns built-in sample demo orders                                 |
 | POST   | `/api/calculate-plan`       | Calculates FIN-equivalent loads, per-driver usage, overload warnings |
+| POST   | `/api/optimize-routes`      | Suggests driver assignments by route area and capacity (preview)      |
+| POST   | `/api/optimize-stop-order`    | Suggests delivery stop sequence per driver (nearest-neighbor)       |
 | POST   | `/api/export-driver-sheets` | Generates a downloadable Excel workbook with driver sheets          |
 | GET    | `/api/health`               | Health check                                                        |
 
 ## Demo workflow
 
 1. **Load orders** — upload the daily Excel sheet, or click *Load sample data*.
-2. **Edit orders** — change pallets, pallet type, stackable, delivery driver,
-   route area, status, and extra info directly in the table. Add or delete rows.
-3. **Set drivers** — define drivers and truck capacities (defaults:
+2. **Save / load plans** — use *Saved plans* to **Save as new**, **Update saved plan**,
+   **Load**, or **Delete**. Work is also auto-saved as a local browser draft.
+3. **Edit orders** — change fields in the table, **+ Add order**, remove a row (×),
+   or **Clear all**.
+4. **Set drivers** — define drivers and truck capacities (defaults:
    Driver A = 48, Driver B = 44, Driver C = 40 FIN units).
-4. **Calculate plan** — see per-driver capacity usage and clear overload
+5. **Optimize routes** (optional) — auto-assign unassigned orders to drivers
+   by route area and truck capacity. Review the preview, then **Apply** or
+   **Apply & calculate**. Check *Include already assigned orders* to re-optimize
+   the full plan.
+6. **Optimize stop order** (optional) — after drivers are assigned, sequence
+   stops within each route from the Lapväärtti terminal (Porintie 382) using
+   approximate area distances. Review and **Apply stop order**.
+7. **Calculate plan** — see per-driver capacity usage and clear overload
    warnings on routes that exceed truck capacity.
-5. **Create next day plan** — removes DELIVERED orders, keeps CARRY_OVER and
+8. **Create next day plan** — removes DELIVERED orders, keeps CARRY_OVER and
    remaining orders for the next day.
-6. **Export driver sheets** — downloads one Excel workbook containing a
-   *Full Plan* sheet, one sheet per delivery driver, and a *Route Summary* sheet.
+9. **Export driver sheets** — downloads one Excel workbook containing a
+   *Full Plan* sheet, one sheet per delivery driver (with **Stop #** when
+   sequenced), and a *Route Summary* sheet.
+10. **Route map** — read-only OpenStreetMap view with pins colored by driver
+   and dashed route lines from the Lapväärtti depot (Porintie 382).
+
+## Delivery addresses (accurate map & routes)
+
+Addresses are optional — without one, an order is placed at its route area
+centre exactly as before. With one, the order is placed at its real location
+and stop order uses real road distances.
+
+**Where an address can come from** (first match wins):
+
+1. An **address column** in the Excel (`Osoite`, `Toimitusosoite`,
+   `Katuosoite`, `Address`, `Delivery address`), e.g. column G.
+2. **Inside the consignee cell**, e.g. `Valio, Tuupakantie 10, 01740 Vantaa`.
+   Street + number and/or postal code + city are extracted; names, phone
+   numbers and door codes are ignored. A postal code alone already helps.
+3. The **address register** — each recurring consignee's address is stored
+   once and filled into orders that have none (matching ignores case,
+   accents, phone numbers and door codes).
+
+Addresses can also be typed or edited in the order table.
+
+**Locate addresses** turns addresses into coordinates using OpenStreetMap
+Nominatim (free; max 1 request/second). Results — including "not found" —
+are cached in SQLite, so each address is looked up only once. Lookup order:
+full address → postal code + city → route area centre. The dot next to each
+address shows the result: green = exact address, yellow = postal code area,
+grey = route area centre.
+
+**Optimize stop order** requests a road distance matrix from OSRM for each
+driver's stops (located ones at their coordinates, others at their area
+centre). If the routing service is unavailable it falls back to approximate
+distances, and the preview notes say which was used.
+
+Configuration (environment variables on the backend):
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `GEOCODING_ENABLED` | `1` | `0` disables geocoder requests (cache still used) |
+| `GEOCODER_URL` | `https://nominatim.openstreetmap.org/search` | Nominatim-compatible endpoint |
+| `ROUTING_ENABLED` | `1` | `0` disables road distances |
+| `OSRM_URL` | `https://router.project-osrm.org` | OSRM server for road distances |
+
+Note: addresses are sent to these external services. The public Nominatim
+and OSRM demo servers are fine for a demo; for daily production use, switch
+to a self-hosted or commercial service (e.g. Digitransit, Google, HERE).
+
+## Route optimization rules
+
+**Driver assignment** (rule-based, explainable):
+
+- Orders are grouped by `routeArea` (empty → "Unspecified").
+- Area clusters are assigned to the driver with the most remaining capacity.
+- If a whole cluster does not fit, orders are split largest-first; overflow stays unassigned.
+- `unassigned_only` mode (default) leaves existing driver assignments unchanged.
+
+**Stop sequencing**:
+
+- Uses road distances (OSRM) between geocoded addresses when available;
+  otherwise area distances (local matrix + haversine between city centroids).
+- Nearest-neighbor from depot (**Lapväärtti / Porintie 382**) through each driver's stops.
+- Driver sheets and the delivery list UI show **Stop #** after applying.
 
 ## Pallet conversion rules
 
@@ -162,6 +257,9 @@ modelled on the customer's real daily sheet:
   the sheet lists one customer with many consignee rows).
 - Imported `lavat` values are treated as FIN units (pallet type FIN), since
   the customer already converts pallet counts to FIN equivalents by hand.
+- If the sheet has no **route area** column, it is **auto-parsed from
+  Vastaanottaja (consignee)** — e.g. `Valio Espoo` → Espoo, `Lidl Laukaa` →
+  Laukaa. Unrecognized names become `Unspecified` with a warning.
 - Fully empty rows are skipped, unparseable pallet counts become 0, and IDs
   are generated automatically.
 
@@ -169,18 +267,17 @@ modelled on the customer's real daily sheet:
 
 - Truck capacity is expressed in FIN pallet units.
 - An order assigned to a driver without a defined capacity gets a warning.
-- Data lives only in browser memory during the session — refresh clears it.
+- Saved plans persist in SQLite on the backend (`data/plans.db`). A local browser
+  draft is also kept automatically in `localStorage`.
 - This is a customer demo, not production software.
 
 ## Future AI extension ideas
 
-- **Automatic route assignment:** suggest the optimal driver per order based on
-  route area, capacity, and historical patterns.
-- **Load optimisation:** pack trucks optimally considering stackability,
-  weight, and delivery sequence.
 - **Excel intelligence:** ML-assisted column mapping and data cleaning for any
   customer spreadsheet format.
 - **Demand forecasting:** predict daily volumes per route from history.
 - **Delivery time windows:** ETA prediction and time-window aware planning.
 - **Natural language interface:** "Move all Nokia orders to Driver B" style
   commands on top of the structured plan.
+- **Better route ordering:** improve nearest-neighbor with 2-opt or a VRP
+  solver now that road distances are available; time windows.

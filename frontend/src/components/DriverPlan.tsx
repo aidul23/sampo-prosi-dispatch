@@ -1,33 +1,59 @@
-import type { Order } from "../types/dispatch";
+import type { DriverCapacity, Order } from "../types/dispatch";
+import { formatDriverLabel } from "../data/areaCentroids";
 
 interface Props {
   orders: Order[];
+  drivers: DriverCapacity[];
   planDateLabel: string;
   onExport: () => void;
   exporting: boolean;
 }
 
-export default function DriverPlan({ orders, planDateLabel, onExport, exporting }: Props) {
-  const drivers = Array.from(
+function sortDriverOrders(driverOrders: Order[]): Order[] {
+  return [...driverOrders].sort((a, b) => {
+    const seqA = a.stopSequence ?? 9999;
+    const seqB = b.stopSequence ?? 9999;
+    if (seqA !== seqB) return seqA - seqB;
+    return a.consignee.localeCompare(b.consignee);
+  });
+}
+
+export default function DriverPlan({
+  orders,
+  drivers,
+  planDateLabel,
+  onExport,
+  exporting,
+}: Props) {
+  const capacityByName = new Map(drivers.map((d) => [d.driverName, d.truckCapacity]));
+  const driverNames = Array.from(
     new Set(orders.map((o) => o.deliveryDriver.trim()).filter(Boolean))
   ).sort();
   const unassigned = orders.filter((o) => !o.deliveryDriver.trim());
 
+  function sectionTitle(driverName: string): string {
+    const capacity = capacityByName.get(driverName);
+    return capacity != null ? formatDriverLabel(driverName, capacity) : driverName;
+  }
+
   function section(title: string, driverOrders: Order[]) {
-    const total = driverOrders.reduce((sum, o) => sum + o.finEquivalent, 0);
+    const sorted = sortDriverOrders(driverOrders);
+    const total = sorted.reduce((sum, o) => sum + o.finEquivalent, 0);
     return (
       <div key={title} className="driver-section">
         <h3>
           {title}{" "}
           <span className="muted">
-            ({driverOrders.length} orders, {total.toFixed(1)} FIN)
+            ({sorted.length} orders, {total.toFixed(1)} FIN)
           </span>
         </h3>
         <div className="table-wrap">
           <table className="driver-plan-table">
             <thead>
               <tr>
+                <th className="col-num">#</th>
                 <th>Consignee</th>
+                <th>Address</th>
                 <th>Customer</th>
                 <th className="col-num">Pallets</th>
                 <th className="col-num">FIN Eq.</th>
@@ -36,9 +62,11 @@ export default function DriverPlan({ orders, planDateLabel, onExport, exporting 
               </tr>
             </thead>
             <tbody>
-              {driverOrders.map((o) => (
+              {sorted.map((o) => (
                 <tr key={o.id}>
+                  <td className="cell-number">{o.stopSequence ?? "—"}</td>
                   <td>{o.consignee || "—"}</td>
+                  <td>{o.address || "—"}</td>
                   <td>{o.customer || "—"}</td>
                   <td className="cell-number">
                     <span className="pallet-count">{o.pallets}</span>
@@ -74,9 +102,9 @@ export default function DriverPlan({ orders, planDateLabel, onExport, exporting 
         <p className="status-text">No orders to group yet.</p>
       ) : (
         <>
-          {drivers.map((driver) =>
+          {driverNames.map((driver) =>
             section(
-              driver,
+              sectionTitle(driver),
               orders.filter((o) => o.deliveryDriver.trim() === driver)
             )
           )}

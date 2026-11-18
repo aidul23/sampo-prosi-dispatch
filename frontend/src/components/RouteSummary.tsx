@@ -25,7 +25,9 @@ export default function RouteSummary({ summaries }: Props) {
                 className={`summary-card ${s.overloaded ? "summary-overloaded" : ""}`}
               >
                 <div className="summary-title">
-                  <strong>{s.driverName}</strong>
+                  <strong>
+                    {s.driverName} ({s.capacity})
+                  </strong>
                   {s.overloaded ? (
                     <span className="badge badge-danger">OVERLOADED</span>
                   ) : (
