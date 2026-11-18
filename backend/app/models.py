@@ -9,8 +9,10 @@ OrderStatus = Literal["NEW", "PLANNED", "DELIVERED", "CARRY_OVER"]
 # How precisely an order was located on the map:
 #   address     -> street address found
 #   postal_code -> postal code area found (street missing or not found)
-#   None        -> not geocoded; map/stop order fall back to route area centre
-GeocodePrecision = Literal["address", "postal_code"]
+#   not_found   -> address was looked up but nothing was found
+#   None        -> no address / not looked up yet
+# Without coordinates, map and routing fall back to the route area centre.
+GeocodePrecision = Literal["address", "postal_code", "not_found"]
 
 
 class Order(BaseModel):

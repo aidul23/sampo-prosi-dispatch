@@ -2,8 +2,11 @@ export type PalletType = "FIN" | "EUR" | "OTHER";
 
 export type OrderStatus = "NEW" | "PLANNED" | "DELIVERED" | "CARRY_OVER";
 
-/** address = street address found; postal_code = postal code area only. */
-export type GeocodePrecision = "address" | "postal_code";
+/**
+ * address = street address found; postal_code = postal code area only;
+ * not_found = looked up, nothing found. null = no address / not looked up yet.
+ */
+export type GeocodePrecision = "address" | "postal_code" | "not_found";
 
 export interface Order {
   id: string;

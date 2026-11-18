@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   applyAddressBook,
   calculatePlan,
@@ -29,7 +29,10 @@ import type {
 import { addDays, formatPlanDateFi, todayIso } from "./utils/date";
 import { clearDraft, formatDraftTime, loadDraft, saveDraft } from "./utils/planDraft";
 import { finEquivalent } from "./utils/pallet";
-import { mergeLocation, withOrderDefaults } from "./utils/order";
+import { mergeLocation, needsLocating, withOrderDefaults } from "./utils/order";
+
+/** Pause after typing before an edited address is looked up. */
+const AUTO_LOCATE_DELAY_MS = 1500;
 
 const DEFAULT_DRIVERS: DriverCapacity[] = [
   { driverName: "Driver A", truckCapacity: 48 },
@@ -61,6 +64,20 @@ export default function App() {
   const [routePreview, setRoutePreview] = useState<OptimizeResponse | null>(null);
   const [stopPreview, setStopPreview] = useState<StopOptimizeResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const ordersRef = useRef(orders);
+  const editedAddressIds = useRef(new Set<string>());
+  const autoLocateTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
+
+  useEffect(
+    () => () => {
+      if (autoLocateTimer.current) window.clearTimeout(autoLocateTimer.current);
+    },
+    []
+  );
 
   useEffect(() => {
     const draft = loadDraft();
@@ -104,6 +121,17 @@ export default function App() {
   }
 
   function handleOrdersChange(updated: Order[]) {
+    const previousById = new Map(orders.map((o) => [o.id, o]));
+    for (const order of updated) {
+      const before = previousById.get(order.id);
+      if (before && before.address !== order.address && order.address.trim()) {
+        editedAddressIds.current.add(order.id);
+      }
+    }
+    if (editedAddressIds.current.size > 0) {
+      if (autoLocateTimer.current) window.clearTimeout(autoLocateTimer.current);
+      autoLocateTimer.current = window.setTimeout(locateEditedAddresses, AUTO_LOCATE_DELAY_MS);
+    }
     setOrders(
       updated.map((o) => ({
         ...o,
@@ -247,6 +275,31 @@ export default function App() {
       setMessage(`Locating addresses failed: ${(err as Error).message}`);
     } finally {
       setGeocoding(false);
+    }
+  }
+
+  /** Look up addresses the planner typed, once they stop typing. */
+  async function locateEditedAddresses() {
+    autoLocateTimer.current = null;
+    const ids = new Set(editedAddressIds.current);
+    editedAddressIds.current.clear();
+    const targets = ordersRef.current.filter((o) => ids.has(o.id) && needsLocating(o));
+    if (targets.length === 0) return;
+    try {
+      const result = await geocodeOrders(targets);
+      mergeLocated(result.orders);
+      const notFound = result.orders.filter((o) => o.geocodePrecision === "not_found");
+      if (notFound.length > 0) {
+        setMessage(
+          `Address not found: ${notFound
+            .map((o) => o.address)
+            .join("; ")}. Check the spelling or add a postal code.`
+        );
+      } else if (result.pending > 0) {
+        setMessage("Could not locate the address right now — press “Locate addresses” to retry.");
+      }
+    } catch (err) {
+      setMessage(`Locating address failed: ${(err as Error).message}`);
     }
   }
 

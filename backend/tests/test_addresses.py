@@ -119,21 +119,23 @@ def test_geocode_uses_postal_fallback_and_cache(temp_db, monkeypatch):
             return (61.49, 23.76)
         if query.startswith("Tuupakantie"):
             return (60.27, 24.94)
-        return None
+        return None  # e.g. "Nowhere 1, 99999 Nowhere" and its postal fallback
 
     monkeypatch.setattr(geocoding_service, "_nominatim_search", fake_search)
     orders = [
         Order(id="1", consignee="A", address="Tuupakantie 10, 01740 Vantaa"),
         Order(id="2", consignee="B", address="Unknownkatu 9, 33100 Tampere"),
         Order(id="3", consignee="C"),  # no address -> untouched
+        Order(id="4", consignee="D", address="Nowhere 1, 99999 Nowhere"),
     ]
     result = geocoding_service.geocode_orders(orders)
     by_id = {o.id: o for o in result.orders}
     assert by_id["1"].geocodePrecision == "address"
     assert by_id["2"].geocodePrecision == "postal_code"
     assert by_id["2"].lat == 61.49
-    assert by_id["3"].lat is None
-    assert (result.located, result.pending, result.failed) == (2, 0, 0)
+    assert by_id["3"].lat is None and by_id["3"].geocodePrecision is None
+    assert by_id["4"].lat is None and by_id["4"].geocodePrecision == "not_found"
+    assert (result.located, result.pending, result.failed) == (2, 0, 1)
 
     calls.clear()
     fresh = [Order(id="9", consignee="A", address="Tuupakantie 10, 01740 Vantaa")]

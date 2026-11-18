@@ -190,6 +190,7 @@ def geocode_orders(orders: List[Order]) -> GeocodeResponse:
             pending += 1
         else:
             failed += 1
+            order.geocodePrecision = "not_found"
 
     if network_error:
         notes.append(f"Geocoding service unavailable, try again later ({network_error}).")

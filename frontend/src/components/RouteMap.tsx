@@ -17,7 +17,7 @@ import {
   jitterCoords,
 } from "../data/areaCentroids";
 import type { LatLng } from "../data/areaCentroids";
-import { hasExactLocation, PRECISION_LABEL } from "../utils/order";
+import { hasExactLocation, LOCATION_LABEL, locationState } from "../utils/order";
 import "leaflet/dist/leaflet.css";
 
 interface Props {
@@ -174,7 +174,7 @@ export default function RouteMap({ orders }: Props) {
                       <br />
                     </>
                   )}
-                  Location: {PRECISION_LABEL[order.geocodePrecision ?? "area"]}
+                  Location: {LOCATION_LABEL[locationState(order)]}
                   <br />
                   Area: {order.routeArea || "Unspecified"}
                   <br />

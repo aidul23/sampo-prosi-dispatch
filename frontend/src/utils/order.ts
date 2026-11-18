@@ -12,7 +12,23 @@ export function withOrderDefaults(order: Order): Order {
 }
 
 export function hasExactLocation(order: Order): boolean {
-  return order.lat != null && order.lng != null && !!order.geocodePrecision;
+  return (
+    order.lat != null &&
+    order.lng != null &&
+    (order.geocodePrecision === "address" || order.geocodePrecision === "postal_code")
+  );
+}
+
+/** Address typed/imported but not looked up yet. */
+export function needsLocating(order: Order): boolean {
+  return order.address.trim() !== "" && !order.geocodePrecision;
+}
+
+export type LocationState = "address" | "postal_code" | "not_found" | "pending" | "none";
+
+export function locationState(order: Order): LocationState {
+  if (order.geocodePrecision) return order.geocodePrecision;
+  return order.address.trim() ? "pending" : "none";
 }
 
 /** Copy only the location fields from a geocoded order onto the current one. */
@@ -30,8 +46,10 @@ export function mergeLocation(current: Order, located: Order): Order {
   };
 }
 
-export const PRECISION_LABEL: Record<string, string> = {
+export const LOCATION_LABEL: Record<LocationState, string> = {
   address: "Exact address",
-  postal_code: "Postal code area",
-  area: "Approximate (route area centre)",
+  postal_code: "Postal code area (street not found)",
+  not_found: "Address not found — check spelling; using route area centre",
+  pending: "Not located yet",
+  none: "No address — using route area centre",
 };

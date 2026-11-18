@@ -456,7 +456,16 @@ tbody tr:hover {
   background: #e6a700;
 }
 
-.location-area {
+.location-not_found {
+  background: var(--danger);
+}
+
+.location-pending {
+  background: #fff;
+  border: 2px solid #c5ccd4;
+}
+
+.location-none {
   background: #c5ccd4;
 }
 

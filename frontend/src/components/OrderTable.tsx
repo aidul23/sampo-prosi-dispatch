@@ -1,7 +1,7 @@
 import type { DriverCapacity, Order, OrderStatus, PalletType } from "../types/dispatch";
 import { ORDER_STATUSES, PALLET_TYPES } from "../types/dispatch";
 import { formatDriverLabel } from "../data/areaCentroids";
-import { PRECISION_LABEL } from "../utils/order";
+import { LOCATION_LABEL, locationState } from "../utils/order";
 
 interface Props {
   orders: Order[];
@@ -67,7 +67,9 @@ export default function OrderTable({ orders, drivers, onChange, onClearAll }: Pr
         <p className="location-legend">
           <span><span className="location-dot location-address" /> Exact address</span>
           <span><span className="location-dot location-postal_code" /> Postal code area</span>
-          <span><span className="location-dot location-area" /> Not located — route area centre</span>
+          <span><span className="location-dot location-not_found" /> Address not found</span>
+          <span><span className="location-dot location-pending" /> Locating…</span>
+          <span><span className="location-dot location-none" /> No address — route area centre</span>
         </p>
         <div className="table-wrap">
           <table className="order-table">
@@ -129,9 +131,9 @@ export default function OrderTable({ orders, drivers, onChange, onClearAll }: Pr
                         onChange={(e) => update(order.id, { address: e.target.value })}
                       />
                       <span
-                        className={`location-dot location-${order.geocodePrecision ?? "area"}`}
-                        title={PRECISION_LABEL[order.geocodePrecision ?? "area"]}
-                        aria-label={PRECISION_LABEL[order.geocodePrecision ?? "area"]}
+                        className={`location-dot location-${locationState(order)}`}
+                        title={LOCATION_LABEL[locationState(order)]}
+                        aria-label={LOCATION_LABEL[locationState(order)]}
                       />
                     </div>
                   </td>
